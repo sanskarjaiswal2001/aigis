@@ -7,6 +7,23 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class TargetConfig(BaseModel):
+    """Single target host (e.g. for SSH-based remote collection)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = ""
+    ssh_key_path: str | None = None
+
+
+class TargetsConfig(BaseModel):
+    """Named targets (hosts) this system can reach."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    homelab: TargetConfig | None = None
+
+
 class ResticConfig(BaseModel):
     """Restic collector config."""
 
@@ -134,6 +151,8 @@ class AppConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    target: str  # Required: which system to monitor ("local" or key from targets)
+    targets: dict[str, TargetConfig] = Field(default_factory=dict)
     collectors: CollectorsConfig = Field(default_factory=CollectorsConfig)
     rules: RulesConfig = Field(default_factory=RulesConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
@@ -146,6 +165,6 @@ def load_config(path: Path | None = None) -> AppConfig:
     if path is None:
         path = Path(__file__).parent.parent.parent / "config" / "default.yaml"
     if not path.exists():
-        return AppConfig()
+        raise FileNotFoundError(f"Config file required: {path}")
     data = yaml.safe_load(path.read_text()) or {}
     return AppConfig.model_validate(data)

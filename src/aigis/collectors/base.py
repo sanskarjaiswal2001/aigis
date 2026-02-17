@@ -1,9 +1,12 @@
 """Collector protocol and runner (Strategy pattern)."""
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from aigis.config import AppConfig
 from aigis.schemas.signals import CollectorRun
+
+if TYPE_CHECKING:
+    from aigis.runner import Runner
 
 
 class CollectorProtocol(Protocol):
@@ -14,7 +17,7 @@ class CollectorProtocol(Protocol):
         """Unique identifier for this collector."""
         ...
 
-    def collect(self, config: AppConfig) -> CollectorRun | list[CollectorRun]:
+    def collect(self, config: AppConfig, runner: "Runner") -> CollectorRun | list[CollectorRun]:
         """Collect signals. Returns one or more CollectorRun."""
         ...
 
@@ -22,6 +25,7 @@ class CollectorProtocol(Protocol):
 def run_collectors(
     collectors: list[CollectorProtocol],
     config: AppConfig,
+    runner: "Runner",
 ) -> list[CollectorRun]:
     """
     Run all collectors, never raising. Failed collectors produce CollectorRun
@@ -30,7 +34,7 @@ def run_collectors(
     results: list[CollectorRun] = []
     for collector in collectors:
         try:
-            run = collector.collect(config)
+            run = collector.collect(config, runner)
             if isinstance(run, list):
                 results.extend(run)
             else:

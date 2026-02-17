@@ -17,6 +17,7 @@ class HealthReport(BaseModel):
     timestamp: datetime = Field(default_factory=datetime.now)
     overall_severity: Severity = Severity.OK
     checks: list[CheckResult] = []
+    collected_metrics: dict[str, list[dict[str, object]]] = {}  # collector_id -> list of signal dicts
     anomaly_explanation: str | None = None
     suggested_actions: list[SuggestedAction] | None = None
     metadata: dict[str, str | int | float] = {}  # config_version, duration_ms, etc.

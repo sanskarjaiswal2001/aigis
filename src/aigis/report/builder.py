@@ -5,6 +5,7 @@ from datetime import datetime
 
 from aigis.schemas.checks import CheckResult, Severity
 from aigis.schemas.report import HealthReport
+from aigis.schemas.signals import CollectorRun
 
 
 def _overall_severity(checks: list[CheckResult]) -> Severity:
@@ -17,19 +18,38 @@ def _overall_severity(checks: list[CheckResult]) -> Severity:
     return max_sev
 
 
+def _serialize_signals(collector_runs: list[CollectorRun]) -> dict[str, list[dict[str, object]]]:
+    """Extract collected metrics from collector runs for report."""
+    out: dict[str, list[dict[str, object]]] = {}
+    for run in collector_runs:
+        signals = []
+        for s in run.signals:
+            if hasattr(s, "model_dump"):
+                signals.append(s.model_dump(mode="json"))
+            elif isinstance(s, dict):
+                signals.append(s)
+            else:
+                signals.append(str(s))
+        out[run.collector_id] = signals
+    return out
+
+
 def build_report(
     checks: list[CheckResult],
+    collector_runs: list[CollectorRun] | None = None,
     anomaly_explanation: str | None = None,
     metadata: dict[str, str | int | float] | None = None,
 ) -> HealthReport:
-    """Build HealthReport from check results and optional LLM explanation."""
+    """Build HealthReport from check results, collected metrics, and optional LLM explanation."""
     run_id = str(uuid.uuid4())[:8]
     overall = _overall_severity(checks)
+    collected_metrics = _serialize_signals(collector_runs or [])
     return HealthReport(
         run_id=run_id,
         timestamp=datetime.now(),
         overall_severity=overall,
         checks=checks,
+        collected_metrics=collected_metrics,
         anomaly_explanation=anomaly_explanation,
         metadata=metadata or {},
     )

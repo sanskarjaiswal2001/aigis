@@ -1,8 +1,16 @@
 """Main entry point for the aigis CLI (Facade pattern)."""
 
 import argparse
+import json
 import sys
+import time
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from datetime import datetime
 
 from aigis.actions import audit_action, execute_action, get_registry
 from aigis.approval import prompt_approval
@@ -16,7 +24,8 @@ from aigis.collectors import (
 )
 from aigis.config import AppConfig, load_config
 from aigis.engine import run_rules
-from aigis.llm import explain_anomalies, suggest_fixes
+from aigis.runner import get_runner
+from aigis.llm import llm_analyze
 from aigis.report import build_report
 
 
@@ -53,24 +62,29 @@ def main() -> None:
 
     config = _resolve_config(args.config)
     collectors = _select_collectors(config)
+    runner = get_runner(config)
+
+    started_at = datetime.now()
+    t0 = time.perf_counter()
 
     # Pipeline: Collect -> Evaluate -> Report
-    collector_runs = run_collectors(collectors, config)
+    collector_runs = run_collectors(collectors, config, runner)
     checks = run_rules(collector_runs, config)
 
-    # Optional LLM explanation
-    anomaly_explanation = explain_anomalies(checks, config)
+    # Optional LLM analysis (single call for explanation + suggestions)
+    llm_result = llm_analyze(checks, config)
+    anomaly_explanation = llm_result.anomaly_explanation if llm_result else None
+    suggested_actions = llm_result.suggested_actions if llm_result else None
 
     report = build_report(
         checks=checks,
+        collector_runs=collector_runs,
         anomaly_explanation=anomaly_explanation,
     )
 
-    # --fix branch: suggest, approve, execute
-    if args.fix and report.overall_severity.value in ("WARN", "CRITICAL"):
-        suggested_actions = suggest_fixes(checks, config)
-        if suggested_actions:
-            report.suggested_actions = suggested_actions
+    # --fix branch: use LLM suggestions, approve, execute
+    if args.fix and report.overall_severity.value in ("WARN", "CRITICAL") and suggested_actions:
+        report.suggested_actions = suggested_actions
 
         if suggested_actions and sys.stdin.isatty():
             if prompt_approval(suggested_actions, report):
@@ -89,7 +103,7 @@ def main() -> None:
             # When not approved, fall through to output report
         # When not TTY, suggested_actions are in report, no approval
 
-    output = report.model_dump_json(indent=2)
+    output = json.dumps(report.model_dump(mode="json", exclude={"collected_metrics"}), indent=2)
 
     if config.report.output == "stdout":
         print(output)

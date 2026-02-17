@@ -1,4 +1,13 @@
 # AIgis default configuration
+# Target system to monitor - required, no default to local
+# Use "local" for this machine, or a key from targets (e.g. homelab)
+target: homelab
+
+targets:
+  local:
+    host: ""  # Empty = run on this machine
+  homelab:
+    host: phoenix@192.168.0.14
 
 collectors:
   enabled:
@@ -51,6 +60,6 @@ actions:
       params: []
 
 llm:
-  enabled: false
-  model: anthropic/claude-sonnet-4-20250514
-  max_tokens: 512
+  enabled: true
+  model: claude-sonnet-4-5-20250929
+  max_tokens: 2048  # Structured output needs room; 512 was truncating
