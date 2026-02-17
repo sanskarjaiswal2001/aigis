@@ -4,47 +4,145 @@ from datetime import datetime, timezone
 
 from aigis.config import AppConfig
 from aigis.schemas.checks import CheckResult, Severity
-from aigis.schemas.signals import CollectorRun, DiskSignal, DockerSignal, LoadSignal, NetworkSignal
+from aigis.schemas.signals import CollectorRun, DiskSignal, DockerSignal, LoadSignal, NetworkSignal, ResticSignal
 
 # Type alias for signal context (collector_id -> runs)
 SignalContext = dict[str, list[CollectorRun]]
 
 
+def _is_repo_or_permission_error(stderr: str | None) -> bool:
+    """True if stderr suggests repo unreachable or permission error."""
+    if not stderr:
+        return False
+    low = stderr.lower()
+    patterns = (
+        "unable to open repo",
+        "connection refused",
+        "no such host",
+        "wrong password",
+        "permission denied",
+        "repository not found",
+        "access denied",
+        "failed to open repository",
+        "invalid repository",
+    )
+    return any(p in low for p in patterns)
+
+
 def _evaluate_restic(ctx: SignalContext, config: AppConfig) -> CheckResult:
-    """Restic: last backup age thresholds."""
+    """Restic: deterministic cascade (reachability, exit status, locks, freshness)."""
     runs = ctx.get("restic", [])
-    if not runs or not runs[0].success:
+    if not runs:
         return CheckResult(
             check_id="restic_backup",
             name="Restic backup",
             severity=Severity.WARN,
             message="Collector failed or missing data",
+            raw_signal_ref=None,
         )
+
+    signal: ResticSignal | None = None
     for run in runs:
         for s in run.signals:
-            if hasattr(s, "last_backup_ts") and s.last_backup_ts:
-                age_h = (datetime.now(timezone.utc) - s.last_backup_ts).total_seconds() / 3600
-                if age_h >= config.rules.restic.critical_hours:
-                    return CheckResult(
-                        check_id="restic_backup",
-                        name="Restic backup",
-                        severity=Severity.CRITICAL,
-                        message=f"Last backup {age_h:.0f}h ago (critical: {config.rules.restic.critical_hours}h)",
-                        value=round(age_h, 1),
-                    )
-                if age_h >= config.rules.restic.warn_hours:
-                    return CheckResult(
-                        check_id="restic_backup",
-                        name="Restic backup",
-                        severity=Severity.WARN,
-                        message=f"Last backup {age_h:.0f}h ago (warn: {config.rules.restic.warn_hours}h)",
-                        value=round(age_h, 1),
-                    )
+            if isinstance(s, ResticSignal):
+                signal = s
+                break
+        if signal:
+            break
+
+    if not signal:
+        return CheckResult(
+            check_id="restic_backup",
+            name="Restic backup",
+            severity=Severity.WARN,
+            message="Collector failed or missing data",
+            raw_signal_ref=None,
+        )
+
+    r = config.rules.restic
+
+    # 2. Repo unreachable
+    if not signal.repo_reachable:
+        return CheckResult(
+            check_id="restic_backup",
+            name="Restic backup",
+            severity=Severity.CRITICAL,
+            message="Repository unreachable",
+            value=signal.last_exit_code,
+            raw_signal_ref=signal.repo_path or None,
+        )
+
+    # 3. Last exit code != 0 (snapshots succeeded but we captured a prior failure - actually no,
+    #   if repo_reachable we already passed. So this is for when we have partial data. Actually
+    #   in our collector, repo_reachable = (exit_code == 0) for snapshots. So we never get here with
+    #   exit_code != 0 and repo_reachable. Skip this step - we only get signal with repo_reachable
+    #   when snapshots succeeded. So steps 3 is for a different scenario. Let me re-read.
+    #   Plan: "3. last_exit_code != 0: If stderr suggests repo/permission: CRITICAL. Else: WARN."
+    #   So we could have a run where snapshots failed (repo_reachable=False) - we already handle that.
+    #   Or we could have a run where snapshots succeeded but a subsequent probe (stats/locks) failed.
+    #   In our collector, we only set last_exit_code from the snapshots run. So if repo_reachable,
+    #   last_exit_code is 0. So step 3 is redundant when we have repo_reachable. I'll keep it for
+    #   robustness in case we change the collector later.
+    if signal.last_exit_code != 0:
+        if _is_repo_or_permission_error(signal.last_stderr):
+            return CheckResult(
+                check_id="restic_backup",
+                name="Restic backup",
+                severity=Severity.CRITICAL,
+                message="Repository or permission error",
+                value=signal.last_exit_code,
+                raw_signal_ref=signal.repo_path or None,
+            )
+        return CheckResult(
+            check_id="restic_backup",
+            name="Restic backup",
+            severity=Severity.WARN,
+            message=f"Restic exited with code {signal.last_exit_code}",
+            value=signal.last_exit_code,
+            raw_signal_ref=signal.repo_path or None,
+        )
+
+    # 4. Stale lock
+    if signal.stale_lock_detected:
+        age_ok = signal.stale_lock_age_minutes is not None and signal.stale_lock_age_minutes < r.stale_lock_warn_minutes
+        if not age_ok:  # age unknown or >= threshold
+            return CheckResult(
+                check_id="restic_backup",
+                name="Restic backup",
+                severity=Severity.WARN,
+                message="Stale lock detected",
+                value=signal.stale_lock_age_minutes,
+                raw_signal_ref=signal.repo_path or None,
+            )
+
+    # 5. Backup freshness
+    age_h = signal.last_snapshot_age_hours
+    if age_h is None or age_h >= r.critical_hours:
+        return CheckResult(
+            check_id="restic_backup",
+            name="Restic backup",
+            severity=Severity.CRITICAL,
+            message=f"Last backup missing or {age_h:.0f}h ago (critical: {r.critical_hours}h)" if age_h is not None else "No successful snapshot",
+            value=age_h,
+            raw_signal_ref=signal.repo_path or None,
+        )
+    if age_h >= r.warn_hours:
+        return CheckResult(
+            check_id="restic_backup",
+            name="Restic backup",
+            severity=Severity.WARN,
+            message=f"Last backup {age_h:.0f}h ago (warn: {r.warn_hours}h)",
+            value=round(age_h, 1),
+            raw_signal_ref=signal.repo_path or None,
+        )
+
+    # 6. OK
     return CheckResult(
         check_id="restic_backup",
         name="Restic backup",
         severity=Severity.OK,
         message="OK",
+        raw_signal_ref=signal.repo_path or None,
     )
 
 

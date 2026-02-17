@@ -103,7 +103,10 @@ def main() -> None:
             # When not approved, fall through to output report
         # When not TTY, suggested_actions are in report, no approval
 
-    output = json.dumps(report.model_dump(mode="json", exclude={"collected_metrics"}), indent=2)
+    output = json.dumps(
+        report.model_dump(mode="json", exclude={"collected_metrics"}, exclude_none=True),
+        indent=2,
+    )
 
     if config.report.output == "stdout":
         print(output)

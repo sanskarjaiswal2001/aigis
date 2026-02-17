@@ -7,14 +7,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ResticSignal(BaseModel):
-    """Restic backup status signal."""
+    """Restic backup status signal (MVP structured output)."""
 
     model_config = ConfigDict(extra="forbid")
 
-    last_backup_ts: datetime | None = None
+    last_snapshot_age_hours: float | None = None
+    expected_interval_hours: float = 24.0
+    last_exit_code: int = 0
+    last_stderr: str | None = None
+    repo_reachable: bool = False
+    stale_lock_detected: bool = False
+    stale_lock_age_minutes: float | None = None
+    repo_size_gb: float | None = None
     snapshot_count: int = 0
     repo_path: str = ""
-    error: str | None = None
+    last_backup_ts: datetime | None = None  # Legacy
 
 
 class DiskSignal(BaseModel):

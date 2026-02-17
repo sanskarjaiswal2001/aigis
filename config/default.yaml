@@ -19,6 +19,7 @@ collectors:
   restic:
     repo_path: ""
     timeout_sec: 30
+    expected_interval_hours: 24
   disk:
     mounts: []  # Empty = auto-detect
   network:
@@ -30,6 +31,7 @@ rules:
   restic:
     warn_hours: 24
     critical_hours: 48
+    stale_lock_warn_minutes: 60
   disk:
     warn_pct: 85
     critical_pct: 95

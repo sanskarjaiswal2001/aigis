@@ -31,6 +31,7 @@ class ResticConfig(BaseModel):
 
     repo_path: str = ""
     timeout_sec: int = 30
+    expected_interval_hours: float = 24.0
 
 
 class DiskConfig(BaseModel):
@@ -76,6 +77,7 @@ class ResticRulesConfig(BaseModel):
 
     warn_hours: float = 24
     critical_hours: float = 48
+    stale_lock_warn_minutes: float = 60
 
 
 class DiskRulesConfig(BaseModel):
