@@ -1,0 +1,56 @@
+# AIgis default configuration
+
+collectors:
+  enabled:
+    - restic
+    - disk
+    - load
+    - network
+    - docker
+  restic:
+    repo_path: ""
+    timeout_sec: 30
+  disk:
+    mounts: []  # Empty = auto-detect
+  network:
+    interfaces: []  # Empty = all
+  docker:
+    timeout_sec: 10
+
+rules:
+  restic:
+    warn_hours: 24
+    critical_hours: 48
+  disk:
+    warn_pct: 85
+    critical_pct: 95
+  load:
+    warn_per_cpu: 2.0
+    critical_per_cpu: 4.0
+  network:
+    require_up: true
+  docker:
+    require_healthy: true
+
+report:
+  output: stdout  # stdout | file
+  file_path: null
+
+actions:
+  timeout_sec: 60
+  audit_log_path: "~/.aigis/audit.log"
+  registry:
+    restart_container:
+      script: scripts/actions/restart_container.sh
+      params: [container_name]
+    run_restic_backup:
+      script: scripts/actions/run_restic.sh
+      params: []
+    clear_disk_cache:
+      script: scripts/actions/clear_disk_cache.sh
+      params: []
+
+llm:
+  enabled: false
+  model: anthropic/claude-sonnet-4-20250514
+  max_tokens: 512
