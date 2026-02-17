@@ -1,8 +1,8 @@
 # Virtual environment
 .venv/
 venv/
-.env/
-env/
+.env
+env
 # Python
 __pycache__/
 *.py[cod]
