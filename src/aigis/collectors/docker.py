@@ -8,6 +8,7 @@ class DockerCollector:
     """Collect Docker container status via docker ps."""
 
     collector_id = "docker"
+    required_commands = ["docker"]
 
     def collect(self, config: AppConfig, runner) -> CollectorRun:
         """Collect docker ps output."""

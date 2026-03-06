@@ -1,7 +1,7 @@
 """Configuration loading and validation."""
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -13,7 +13,9 @@ class TargetConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     host: str = ""
+    auth: Literal["key", "password"] = "key"
     ssh_key_path: str | None = None
+    password: str | None = None
 
 
 class TargetsConfig(BaseModel):
@@ -138,6 +140,16 @@ class ActionsConfig(BaseModel):
     audit_log_path: str = "~/.aigis/audit.log"
 
 
+class PhoenixConfig(BaseModel):
+    """Phoenix tracing config for LLM observability."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    endpoint: str = "https://app.phoenix.arize.com/s/phoenix2810/v1/traces"
+    project_name: str = "aigis"
+
+
 class LLMConfig(BaseModel):
     """LLM section."""
 
@@ -146,6 +158,7 @@ class LLMConfig(BaseModel):
     enabled: bool = False
     model: str = "anthropic/claude-sonnet-4-20250514"
     max_tokens: int = 512
+    phoenix: PhoenixConfig = Field(default_factory=PhoenixConfig)
 
 
 class AppConfig(BaseModel):

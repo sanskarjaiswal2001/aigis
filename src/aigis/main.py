@@ -26,7 +26,8 @@ from aigis.config import AppConfig, load_config
 from aigis.engine import run_rules
 from aigis.runner import get_runner
 from aigis.llm import llm_analyze
-from aigis.report import build_report
+from aigis.llm.tracing import init_tracing
+from aigis.report import build_report, render_markdown
 
 
 def _resolve_config(config_path: Path | None) -> AppConfig:
@@ -54,6 +55,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="AIgis health check")
     parser.add_argument("--config", type=Path, help="Config file path")
     parser.add_argument(
+        "--target",
+        type=str,
+        default=None,
+        help="Override config target (e.g. 'local' for local-only run)",
+    )
+    parser.add_argument(
         "--fix",
         action="store_true",
         help="Enable suggest fix, human approval, and scripted action",
@@ -61,6 +68,9 @@ def main() -> None:
     args = parser.parse_args()
 
     config = _resolve_config(args.config)
+    if args.target:
+        config = config.model_copy(update={"target": args.target})
+    init_tracing(config)
     collectors = _select_collectors(config)
     runner = get_runner(config)
 
@@ -112,6 +122,9 @@ def main() -> None:
         print(output)
     elif config.report.file_path:
         Path(config.report.file_path).write_text(output)
+
+    md_path = Path(__file__).parent.parent.parent / "report.md"
+    md_path.write_text(render_markdown(report), encoding="utf-8")
 
     # Exit code: CRITICAL -> 1
     if report.overall_severity.value == "CRITICAL":

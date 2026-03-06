@@ -1,8 +1,10 @@
 """Restic backup status collector (MVP: freshness, exit status, reachability, locks)."""
 
 import json
+import os
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 from aigis.config import AppConfig
 from aigis.schemas.signals import CollectorRun, ResticSignal
@@ -54,14 +56,72 @@ def _parse_lock_age(text: str) -> float | None:
     return None
 
 
+def _is_restic_repo(path: Path) -> bool:
+    """Check if a directory has the structure of a restic repository."""
+    try:
+        return (
+            (path / "config").is_file()
+            and (path / "data").is_dir()
+            and (path / "keys").is_dir()
+        )
+    except (PermissionError, OSError):
+        return False
+
+
+def _discover_repo() -> str | None:
+    """Try to find an existing restic repo: env var, then filesystem scan."""
+    env_repo = os.environ.get("RESTIC_REPOSITORY")
+    if env_repo:
+        return env_repo
+
+    home = Path.home()
+    search_roots = [
+        home,
+        home / "backups",
+        home / "backup",
+        home / "restic",
+        home / "restic-repo",
+        home / ".restic",
+        Path("/srv/restic"),
+        Path("/var/backups"),
+    ]
+
+    for root in search_roots:
+        if not root.is_dir():
+            continue
+        if _is_restic_repo(root):
+            return str(root)
+        try:
+            for child in root.iterdir():
+                if child.is_dir() and _is_restic_repo(child):
+                    return str(child)
+        except (PermissionError, OSError):
+            continue
+
+    return None
+
+
 class ResticCollector:
     """Collect Restic backup status via snapshots, stats, and locks probes."""
 
     collector_id = "restic"
+    required_commands = ["restic"]
 
     def collect(self, config: AppConfig, runner) -> CollectorRun:
         """Run restic probes and build structured ResticSignal."""
-        repo = config.collectors.restic.repo_path or "/"
+        repo = config.collectors.restic.repo_path
+
+        if not repo and runner.is_local:
+            repo = _discover_repo()
+            if not repo:
+                return CollectorRun(
+                    collector_id=self.collector_id,
+                    success=False,
+                    error_message="No restic repo configured and none found. "
+                    "Set collectors.restic.repo_path in config or RESTIC_REPOSITORY env var.",
+                )
+
+        repo = repo or "/"
         timeout = config.collectors.restic.timeout_sec
         expected_hours = config.collectors.restic.expected_interval_hours
 

@@ -1,7 +1,11 @@
 """Network status collector."""
 
+import socket
+
 from aigis.config import AppConfig
 from aigis.schemas.signals import CollectorRun, NetworkSignal
+
+_IP_FAMILIES = {socket.AF_INET.value, socket.AF_INET6.value}
 
 
 class NetworkCollector:
@@ -31,7 +35,7 @@ class NetworkCollector:
                 addr_list = [
                     str(a.address)
                     for a in addrs.get(name, [])
-                    if getattr(a.family, "value", a.family) in (2, 10)
+                    if getattr(a.family, "value", a.family) in _IP_FAMILIES
                 ]
                 signals.append(
                     NetworkSignal(
@@ -76,7 +80,7 @@ class NetworkCollector:
             signals.append(
                 NetworkSignal(
                     interface=name,
-                    up=state.upper() == "UP",
+                    up=state.upper() in ("UP", "UNKNOWN"),
                     addresses=addr_list,
                 )
             )

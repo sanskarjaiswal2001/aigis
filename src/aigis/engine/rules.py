@@ -10,6 +10,14 @@ from aigis.schemas.signals import CollectorRun, DiskSignal, DockerSignal, LoadSi
 SignalContext = dict[str, list[CollectorRun]]
 
 
+def _collector_error(runs: list[CollectorRun]) -> str:
+    """Extract the first meaningful error_message from failed runs."""
+    for run in runs:
+        if not run.success and run.error_message:
+            return run.error_message
+    return "Collector failed or missing data"
+
+
 def _is_repo_or_permission_error(stderr: str | None) -> bool:
     """True if stderr suggests repo unreachable or permission error."""
     if not stderr:
@@ -55,7 +63,7 @@ def _evaluate_restic(ctx: SignalContext, config: AppConfig) -> CheckResult:
             check_id="restic_backup",
             name="Restic backup",
             severity=Severity.WARN,
-            message="Collector failed or missing data",
+            message=_collector_error(runs),
             raw_signal_ref=None,
         )
 
@@ -155,7 +163,7 @@ def _evaluate_disk(ctx: SignalContext, config: AppConfig) -> list[CheckResult]:
                 check_id="disk_usage",
                 name="Disk usage",
                 severity=Severity.WARN,
-                message="Collector failed or missing data",
+                message=_collector_error(runs) if runs else "Collector failed or missing data",
             )
         ]
     results: list[CheckResult] = []
@@ -186,6 +194,15 @@ def _evaluate_disk(ctx: SignalContext, config: AppConfig) -> list[CheckResult]:
                             raw_signal_ref=mp,
                         )
                     )
+    if not results:
+        results.append(
+            CheckResult(
+                check_id="disk_usage",
+                name="Disk usage",
+                severity=Severity.OK,
+                message="OK",
+            )
+        )
     return results
 
 
@@ -197,7 +214,7 @@ def _evaluate_load(ctx: SignalContext, config: AppConfig) -> CheckResult:
             check_id="system_load",
             name="System load",
             severity=Severity.WARN,
-            message="Collector failed or missing data",
+            message=_collector_error(runs) if runs else "Collector failed or missing data",
         )
     try:
         import psutil
@@ -242,13 +259,26 @@ def _evaluate_network(ctx: SignalContext, config: AppConfig) -> list[CheckResult
                 check_id="network",
                 name="Network",
                 severity=Severity.WARN,
-                message="Collector failed or missing data",
+                message=_collector_error(runs) if runs else "Collector failed or missing data",
             )
         ]
-    results: list[CheckResult] = []
+
+    configured_ifaces = set(config.collectors.network.interfaces)
+    all_signals: list[NetworkSignal] = []
     for run in runs:
         for s in run.signals:
-            if isinstance(s, NetworkSignal) and not s.up:
+            if isinstance(s, NetworkSignal):
+                all_signals.append(s)
+
+    up_signals = [s for s in all_signals if s.up]
+    down_signals = [s for s in all_signals if not s.up]
+
+    results: list[CheckResult] = []
+
+    if configured_ifaces:
+        # User explicitly listed interfaces -- flag each downed one as CRITICAL
+        for s in down_signals:
+            if s.interface in configured_ifaces:
                 results.append(
                     CheckResult(
                         check_id="network",
@@ -258,6 +288,17 @@ def _evaluate_network(ctx: SignalContext, config: AppConfig) -> list[CheckResult
                         raw_signal_ref=s.interface,
                     )
                 )
+    elif not up_signals:
+        # Auto-detect mode: CRITICAL only when *nothing* is up
+        results.append(
+            CheckResult(
+                check_id="network",
+                name="Network",
+                severity=Severity.CRITICAL,
+                message="No network interfaces are up",
+            )
+        )
+
     return results
 
 
@@ -270,7 +311,7 @@ def _evaluate_docker(ctx: SignalContext, config: AppConfig) -> list[CheckResult]
                 check_id="docker",
                 name="Docker",
                 severity=Severity.WARN,
-                message="Collector failed or missing data",
+                message=_collector_error(runs) if runs else "Collector failed or missing data",
             )
         ]
     results: list[CheckResult] = []

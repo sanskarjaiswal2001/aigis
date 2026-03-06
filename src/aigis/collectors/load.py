@@ -1,7 +1,11 @@
 """System load collector."""
 
+import platform
+
 from aigis.config import AppConfig
 from aigis.schemas.signals import CollectorRun, LoadSignal
+
+_IS_WINDOWS = platform.system() == "Windows"
 
 
 class LoadCollector:
@@ -20,6 +24,15 @@ class LoadCollector:
             import psutil
 
             load_1, load_5, load_15 = psutil.getloadavg()
+
+            if _IS_WINDOWS and load_1 == 0.0 and load_5 == 0.0 and load_15 == 0.0:
+                # getloadavg() returns zeros for the first ~5s on Windows;
+                # fall back to cpu_percent as a synthetic load value.
+                cpu_count = psutil.cpu_count() or 1
+                pct = psutil.cpu_percent(interval=1)
+                synthetic = round(pct / 100.0 * cpu_count, 2)
+                load_1 = load_5 = load_15 = synthetic
+
             return CollectorRun(
                 collector_id=self.collector_id,
                 success=True,
