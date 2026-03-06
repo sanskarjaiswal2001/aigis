@@ -3,6 +3,7 @@
 from aigis.schemas.actions import ActionId, ExecuteResult, SuggestedAction
 from aigis.schemas.checks import CheckResult, Severity
 from aigis.schemas.report import HealthReport
+from aigis.schemas.run_history import RunHistoryEntry, RunPhase
 from aigis.schemas.signals import (
     CollectorRun,
     DiskSignal,
@@ -23,6 +24,8 @@ __all__ = [
     "LoadSignal",
     "NetworkSignal",
     "ResticSignal",
+    "RunHistoryEntry",
+    "RunPhase",
     "Severity",
     "SuggestedAction",
 ]

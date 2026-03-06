@@ -41,9 +41,11 @@ def _format_explanation(result: LLMAnalysisResult) -> str:
 def llm_analyze(
     checks: list[CheckResult],
     config: AppConfig,
+    previous_run_context: dict | None = None,
 ) -> AnalysisOutput | None:
     """
     Single LLM call: analyze checks, return explanation and suggested actions.
+    previous_run_context: optional summary from last run (continuity); see history.build_previous_run_summary.
     Returns None if LLM disabled, no WARN/CRITICAL checks, or API failure.
     """
     if not config.llm.enabled:
@@ -61,6 +63,7 @@ def llm_analyze(
         max_tokens=config.llm.max_tokens,
         api_key=api_key,
         action_registry=action_registry,
+        previous_run_context=previous_run_context,
     )
     if not result:
         return None

@@ -3,6 +3,8 @@
 venv/
 .env
 env
+# Local run history (project-local)
+.aigis/
 # Python
 __pycache__/
 *.py[cod]

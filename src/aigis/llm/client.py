@@ -97,6 +97,7 @@ def llm_analyze_impl(
     max_tokens: int,
     api_key: str | None,
     action_registry: dict[str, Any] | None = None,
+    previous_run_context: dict | None = None,
 ) -> LLMAnalysisResult | None:
     """
     Call Anthropic API with AIgis system prompt.
@@ -118,9 +119,49 @@ def llm_analyze_impl(
                 params = getattr(entry, "params", []) if hasattr(entry, "params") else []
                 registry_info += f"- {aid}: params {params}\n"
 
-        user_content = f"""Analyze the following infrastructure health check results.
+        previous_run_block = ""
+        if previous_run_context:
+            prev = previous_run_context
+            lines = [
+                "Previous run (continuity):",
+                f"  Run ID: {prev.get('last_run_id', '?')}",
+                f"  Timestamp: {prev.get('last_timestamp', '?')}",
+                f"  Target: {prev.get('last_target', '?')}",
+                f"  Overall severity: {prev.get('last_severity', '?')}",
+            ]
+            failed = prev.get("last_failed_checks") or []
+            if failed:
+                lines.append("  Failed/warn checks:")
+                for item in failed:
+                    lines.append(f"    - {item}")
+                msg_map = prev.get("last_failed_check_messages") or {}
+                if msg_map:
+                    lines.append("  Check messages (for comparison with current run):")
+                    for cid, msg in msg_map.items():
+                        lines.append(f"    - {cid}: {msg}")
+            collectors_failed = prev.get("last_collector_failures") or []
+            if collectors_failed:
+                lines.append(f"  Collectors that failed: {', '.join(collectors_failed)}")
+            suggested = prev.get("last_suggested_action_count", 0) or 0
+            healing = prev.get("last_healing_actions") or []
+            lines.append(f"  Suggested actions (last run): {suggested}")
+            if healing:
+                lines.append("  Healing actions executed:")
+                for h in healing:
+                    lines.append(f"    - {h.get('action_id', '?')}: {'success' if h.get('success') else 'failed'}")
+            else:
+                lines.append("  Healing actions executed: none")
+            lines.append(f"  Any wait-required action was applied: {prev.get('any_wait_required', False)}")
+            previous_run_block = (
+                "\n\nUse this context: do not suggest the same fix again if it was already applied; "
+                "if a wait-required fix was applied and the issue persists, suggest a follow-up or mark for human review; "
+                "compare check messages to see if issues are unchanged, improved, or new.\n\n"
+                + "\n".join(lines)
+                + "\n\n"
+            )
 
-{registry_info}
+        user_content = f"""Analyze the following infrastructure health check results.
+{previous_run_block}{registry_info}
 
 Health check results (JSON):
 {checks_json}

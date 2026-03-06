@@ -140,6 +140,15 @@ class ActionsConfig(BaseModel):
     audit_log_path: str = "~/.aigis/audit.log"
 
 
+class RunHistoryConfig(BaseModel):
+    """Run history: path and how many runs to load for previous-run context."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = ".aigis/run_history.jsonl"  # project-local, relative to cwd
+    last_n_runs: int = 20
+
+
 class PhoenixConfig(BaseModel):
     """Phoenix tracing config for LLM observability."""
 
@@ -172,6 +181,7 @@ class AppConfig(BaseModel):
     rules: RulesConfig = Field(default_factory=RulesConfig)
     report: ReportConfig = Field(default_factory=ReportConfig)
     actions: ActionsConfig = Field(default_factory=ActionsConfig)
+    run_history: RunHistoryConfig = Field(default_factory=RunHistoryConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
 
 

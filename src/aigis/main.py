@@ -25,6 +25,12 @@ from aigis.collectors import (
 from aigis.config import AppConfig, load_config
 from aigis.engine import run_rules
 from aigis.runner import get_runner
+from aigis.history import (
+    append_run_history,
+    build_previous_run_summary,
+    build_run_history_entry,
+    load_run_history,
+)
 from aigis.llm import llm_analyze
 from aigis.llm.tracing import init_tracing
 from aigis.report import build_report, render_markdown
@@ -74,6 +80,10 @@ def main() -> None:
     collectors = _select_collectors(config)
     runner = get_runner(config)
 
+    # Load run history for continuity (previous-run context)
+    history_entries = load_run_history(config)
+    previous_run_context = build_previous_run_summary(history_entries)
+
     started_at = datetime.now()
     t0 = time.perf_counter()
 
@@ -81,8 +91,8 @@ def main() -> None:
     collector_runs = run_collectors(collectors, config, runner)
     checks = run_rules(collector_runs, config)
 
-    # Optional LLM analysis (single call for explanation + suggestions)
-    llm_result = llm_analyze(checks, config)
+    # Optional LLM analysis (single call for explanation + suggestions; includes previous-run context)
+    llm_result = llm_analyze(checks, config, previous_run_context=previous_run_context)
     anomaly_explanation = llm_result.anomaly_explanation if llm_result else None
     suggested_actions = llm_result.suggested_actions if llm_result else None
 
@@ -93,6 +103,7 @@ def main() -> None:
     )
 
     # --fix branch: use LLM suggestions, approve, execute
+    healing_results: list[tuple[str, bool]] = []  # (action_id, success) for run history
     if args.fix and report.overall_severity.value in ("WARN", "CRITICAL") and suggested_actions:
         report.suggested_actions = suggested_actions
 
@@ -101,6 +112,7 @@ def main() -> None:
                 registry = get_registry(config)
                 for action in suggested_actions:
                     result = execute_action(action, registry, config)
+                    healing_results.append((action.action_id, result.success))
                     audit_action(
                         report.run_id,
                         action,
@@ -125,6 +137,19 @@ def main() -> None:
 
     md_path = Path(__file__).parent.parent.parent / "report.md"
     md_path.write_text(render_markdown(report), encoding="utf-8")
+
+    # Append run history for next run's continuity
+    suggested_count = len(suggested_actions) if suggested_actions else 0
+    history_entry = build_run_history_entry(
+        report=report,
+        collector_runs=collector_runs,
+        checks=checks,
+        target=config.target,
+        anomaly_explanation=anomaly_explanation,
+        suggested_action_count=suggested_count,
+        healing_results=healing_results if healing_results else None,
+    )
+    append_run_history(history_entry, config)
 
     # Exit code: CRITICAL -> 1
     if report.overall_severity.value == "CRITICAL":
