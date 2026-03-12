@@ -108,6 +108,50 @@ def build_previous_run_summary(entries: list[RunHistoryEntry]) -> dict[str, Any]
     }
 
 
+def build_trend_summary(entries: list[RunHistoryEntry]) -> dict | None:
+    """
+    Aggregate last N runs to detect recurring and consecutive failures.
+    Returns dict with keys: runs_analyzed, recurring_issues, consecutive_failures.
+    Returns None if fewer than 2 entries.
+    """
+    if len(entries) < 2:
+        return None
+
+    # Collect severity per check_id across all entries
+    check_severities: dict[str, list[str]] = {}
+    for entry in entries:
+        for p in entry.phases:
+            if p.category == "evaluation" and p.details:
+                for check_id, sev in p.details.items():
+                    check_severities.setdefault(check_id, []).append(str(sev))
+
+    recurring: list[str] = []   # Failing in >= 50% of runs
+    consecutive: list[str] = [] # Failing in last 3+ consecutive runs
+
+    for check_id, sevs in check_severities.items():
+        failing = [s for s in sevs if s in ("WARN", "CRITICAL")]
+        if len(failing) >= len(sevs) * 0.5:
+            recurring.append(f"{check_id} ({len(failing)}/{len(sevs)} runs)")
+        # Count consecutive failures from most recent
+        consec = 0
+        for s in reversed(sevs):
+            if s in ("WARN", "CRITICAL"):
+                consec += 1
+            else:
+                break
+        if consec >= 3:
+            consecutive.append(f"{check_id} (last {consec} runs)")
+
+    if not recurring and not consecutive:
+        return None
+
+    return {
+        "runs_analyzed": len(entries),
+        "recurring_issues": recurring,
+        "consecutive_failures": consecutive,
+    }
+
+
 def build_run_history_entry(
     report: HealthReport,
     collector_runs: list[CollectorRun],
@@ -209,6 +253,7 @@ def build_run_history_entry(
         target=target,
         overall_severity=report.overall_severity.value,
         phases=phases,
+        anomaly_explanation=anomaly_explanation,
     )
 
 

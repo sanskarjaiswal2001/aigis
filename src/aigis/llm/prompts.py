@@ -30,29 +30,33 @@ You must:
    - Confirmed issue
    - Possible cause
    - Recommended action
+5. For every WARN-severity item in detected_issues, include at least one recommended_action (an investigation step is acceptable).
+6. Keep all descriptions ≤12 words. Omit fields that are empty arrays.
+7. For non-registry actions (action_id not in the provided registry), populate "steps" with 2–5 concrete investigation/remediation steps. For registry actions, omit "steps".
 
 OUTPUT FORMAT (STRICT JSON ONLY):
 
 {
-  "summary": "<concise explanation>",
+  "summary": "<1–2 sentences max — the single most critical finding. Do NOT comma-list multiple findings.>",
   "confidence": "<low | medium | high>",
   "detected_issues": [
     {
       "component": "<component_name>",
-      "severity": "<OK | WARN | CRITICAL>",
-      "explanation": "<technical explanation grounded in input>"
+      "severity": "<WARN | CRITICAL>",
+      "explanation": "<one sentence grounded in the input data — omit OK items>"
     }
   ],
   "recommended_actions": [
     {
-      "action_id": "<must map to predefined action registry if applicable>",
-      "description": "<clear, minimal remediation step>",
+      "action_id": "<must map to predefined action registry if applicable, else use a short snake_case label>",
+      "description": "<clear, minimal remediation step — ≤12 words>",
       "params": {"<param_name>": "<value>"},
       "risk_level": "<low | medium | high>",
-      "requires_human_approval": true
+      "requires_human_approval": true,
+      "steps": ["<imperative step ≤10 words>"]
     }
   ],
-  "reasoning_trace": "<brief explanation of how conclusions were derived>"
+  "reasoning_trace": "<1–2 sentences — how you reached your conclusions, no repetition of summary>"
 }
 
 Safety Rules:

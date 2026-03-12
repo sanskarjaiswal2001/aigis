@@ -109,7 +109,7 @@ class ResticCollector:
 
     def collect(self, config: AppConfig, runner) -> CollectorRun:
         """Run restic probes and build structured ResticSignal."""
-        repo = config.collectors.restic.repo_path
+        repo: str | None = config.collectors.restic.repo_path or None
 
         if not repo and runner.is_local:
             repo = _discover_repo()
@@ -121,12 +121,16 @@ class ResticCollector:
                     "Set collectors.restic.repo_path in config or RESTIC_REPOSITORY env var.",
                 )
 
-        repo = repo or "/"
+        # For remote runners with no repo_path: omit -r and let the remote host's
+        # RESTIC_REPOSITORY env var (from ~/.profile) supply the repo.
         timeout = config.collectors.restic.timeout_sec
         expected_hours = config.collectors.restic.expected_interval_hours
 
+        def _restic_cmd(subcmd: list[str]) -> list[str]:
+            return ["restic", "-r", repo, *subcmd] if repo else ["restic", *subcmd]
+
         # Probe 1: snapshots (primary - determines reachability)
-        r = runner.run(["restic", "-r", repo, "snapshots", "--json"], timeout=timeout)
+        r = runner.run(_restic_cmd(["snapshots", "--json"]), timeout=timeout)
         exit_code = r.returncode
         stderr = (r.stderr or "")[:500]
 
@@ -164,16 +168,32 @@ class ResticCollector:
         stale_lock_age_minutes = None
 
         if repo_reachable:
-            r_stats = runner.run(["restic", "-r", repo, "stats", "--mode", "raw-data"], timeout=timeout)
+            r_stats = runner.run(_restic_cmd(["stats", "--mode", "raw-data"]), timeout=timeout)
             if r_stats.returncode == 0 and r_stats.stdout:
                 size_bytes = _parse_size_bytes(r_stats.stdout)
                 if size_bytes is not None:
                     repo_size_gb = round(size_bytes / (1024**3), 2)
 
-            r_locks = runner.run(["restic", "-r", repo, "list", "locks", "--no-lock"], timeout=timeout)
+            r_locks = runner.run(_restic_cmd(["list", "locks", "--no-lock"]), timeout=timeout)
             if r_locks.returncode == 0 and r_locks.stdout and r_locks.stdout.strip():
                 stale_lock_detected = True
                 stale_lock_age_minutes = _parse_lock_age(r_locks.stdout)
+
+        # Probe 4: integrity sampling (optional, disabled by default — can be slow)
+        integrity_check_passed: bool | None = None
+        integrity_check_errors: str | None = None
+
+        if repo_reachable and config.collectors.restic.integrity_check_enabled:
+            subset = config.collectors.restic.data_check_subset_percent
+            int_timeout = config.collectors.restic.integrity_timeout_sec
+            r_check = runner.run(
+                _restic_cmd(["check", f"--read-data-subset={subset}%"]),
+                timeout=int_timeout,
+            )
+            integrity_check_passed = r_check.returncode == 0
+            if not integrity_check_passed:
+                raw = (r_check.stdout + "\n" + r_check.stderr).strip()
+                integrity_check_errors = raw[:500] or None
 
         signal = ResticSignal(
             last_snapshot_age_hours=last_snapshot_age_hours,
@@ -185,8 +205,10 @@ class ResticCollector:
             stale_lock_age_minutes=stale_lock_age_minutes,
             repo_size_gb=repo_size_gb,
             snapshot_count=snapshot_count,
-            repo_path=repo,
+            repo_path=repo or "$RESTIC_REPOSITORY",
             last_backup_ts=last_ts,
+            integrity_check_passed=integrity_check_passed,
+            integrity_check_errors=integrity_check_errors,
         )
 
         success = repo_reachable

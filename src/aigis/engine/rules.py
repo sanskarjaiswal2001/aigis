@@ -117,7 +117,7 @@ def _evaluate_restic(ctx: SignalContext, config: AppConfig) -> CheckResult:
             return CheckResult(
                 check_id="restic_backup",
                 name="Restic backup",
-                severity=Severity.WARN,
+                severity=Severity.CRITICAL,
                 message="Stale lock detected",
                 value=signal.stale_lock_age_minutes,
                 raw_signal_ref=signal.repo_path or None,
@@ -150,6 +150,41 @@ def _evaluate_restic(ctx: SignalContext, config: AppConfig) -> CheckResult:
         name="Restic backup",
         severity=Severity.OK,
         message="OK",
+        raw_signal_ref=signal.repo_path or None,
+    )
+
+
+def _evaluate_restic_integrity(ctx: SignalContext, config: AppConfig) -> CheckResult | None:
+    """Restic integrity sampling: returns a CheckResult only when the probe ran."""
+    runs = ctx.get("restic", [])
+    signal: ResticSignal | None = None
+    for run in runs:
+        for s in run.signals:
+            if isinstance(s, ResticSignal):
+                signal = s
+                break
+        if signal:
+            break
+
+    if signal is None or signal.integrity_check_passed is None:
+        return None  # Probe disabled or repo unreachable — no row emitted
+
+    subset = config.collectors.restic.data_check_subset_percent
+    if signal.integrity_check_passed:
+        return CheckResult(
+            check_id="restic_integrity",
+            name="Restic integrity",
+            severity=Severity.OK,
+            message=f"Integrity check passed ({subset:.4g}% sampled)",
+            raw_signal_ref=signal.repo_path or None,
+        )
+
+    return CheckResult(
+        check_id="restic_integrity",
+        name="Restic integrity",
+        severity=Severity.CRITICAL,
+        message="Data corruption detected in repository",
+        value=signal.integrity_check_errors,
         raw_signal_ref=signal.repo_path or None,
     )
 
@@ -354,6 +389,9 @@ def evaluate_all_rules(
 
     results: list[CheckResult] = []
     results.append(_evaluate_restic(ctx, config))
+    integrity_result = _evaluate_restic_integrity(ctx, config)
+    if integrity_result is not None:
+        results.append(integrity_result)
     results.extend(_evaluate_disk(ctx, config))
     results.append(_evaluate_load(ctx, config))
     results.extend(_evaluate_network(ctx, config))

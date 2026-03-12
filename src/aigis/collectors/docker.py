@@ -15,7 +15,7 @@ class DockerCollector:
         timeout = config.collectors.docker.timeout_sec
 
         r = runner.run(
-            ["docker", "ps", "-a", "--format", r"{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{.Health}}"],
+            ["docker", "ps", "-a", "--format", r"{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Status}}\t{{if .Health}}{{.Health}}{{end}}"],
             timeout=timeout,
         )
         if r.returncode != 0:

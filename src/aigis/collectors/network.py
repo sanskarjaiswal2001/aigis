@@ -58,32 +58,50 @@ class NetworkCollector:
             )
 
     def _collect_remote(self, config: AppConfig, runner) -> CollectorRun:
-        # ip -br addr: brief format, interface state and addresses
-        r = runner.run(["ip", "-br", "addr", "show"], timeout=config.collectors.restic.timeout_sec)
+        # Use `ip addr show` (full format, no flags) — universally supported across all
+        # iproute2 versions. The `-br` (brief) flag can fail on some configurations.
+        r = runner.run(["ip", "addr", "show"], timeout=15, login_shell=False)
         if r.returncode != 0:
             return CollectorRun(
                 collector_id=self.collector_id,
                 success=False,
-                error_message=r.stderr or f"ip exited {r.returncode}",
+                error_message=r.stderr.strip() or f"ip addr show exited {r.returncode}",
             )
+
         signals: list[NetworkSignal] = []
         ifaces = config.collectors.network.interfaces
-        for line in r.stdout.strip().splitlines():
-            parts = line.split(maxsplit=2)
-            if len(parts) < 2:
-                continue
-            name, state = parts[0], parts[1]
-            if ifaces and name not in ifaces:
-                continue
-            addrs = parts[2].split() if len(parts) > 2 else []
-            addr_list = [a for a in addrs if ":" not in a or a.startswith("inet")]
+
+        current_name: str | None = None
+        current_up: bool = False
+        current_addrs: list[str] = []
+
+        def _flush() -> None:
+            if current_name is None:
+                return
+            if ifaces and current_name not in ifaces:
+                return
             signals.append(
-                NetworkSignal(
-                    interface=name,
-                    up=state.upper() in ("UP", "UNKNOWN"),
-                    addresses=addr_list,
-                )
+                NetworkSignal(interface=current_name, up=current_up, addresses=list(current_addrs))
             )
+
+        for line in r.stdout.splitlines():
+            # Interface header line: "2: eth0: <FLAGS> ... state UP ..."
+            if line and line[0].isdigit():
+                _flush()
+                parts = line.split()
+                current_name = parts[1].rstrip(":") if len(parts) > 1 else None
+                current_up = "state UP" in line or "state UNKNOWN" in line
+                current_addrs = []
+            # Address lines (indented with spaces/tabs)
+            elif current_name and line.startswith(("    ", "\t")):
+                stripped = line.strip()
+                if stripped.startswith(("inet ", "inet6 ")):
+                    addr_parts = stripped.split()
+                    if len(addr_parts) >= 2:
+                        current_addrs.append(addr_parts[1])
+
+        _flush()
+
         return CollectorRun(
             collector_id=self.collector_id,
             success=True,

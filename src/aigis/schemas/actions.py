@@ -22,6 +22,7 @@ class SuggestedAction(BaseModel):
     action_id: str
     params: dict[str, str | int | float | bool] = {}
     reason: str = ""
+    description: str | None = None  # LLM description of what the script does
 
 
 class ExecuteResult(BaseModel):

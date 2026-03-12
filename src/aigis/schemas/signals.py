@@ -22,6 +22,8 @@ class ResticSignal(BaseModel):
     snapshot_count: int = 0
     repo_path: str = ""
     last_backup_ts: datetime | None = None  # Legacy
+    integrity_check_passed: bool | None = None  # None = not run / disabled
+    integrity_check_errors: str | None = None  # Error snippet on failure
 
 
 class DiskSignal(BaseModel):

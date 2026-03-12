@@ -27,3 +27,4 @@ class RunHistoryEntry(BaseModel):
     target: str
     overall_severity: str  # OK | WARN | CRITICAL
     phases: list[RunPhase] = Field(default_factory=list)
+    anomaly_explanation: str | None = None

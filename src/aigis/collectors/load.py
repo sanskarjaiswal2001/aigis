@@ -52,7 +52,7 @@ class LoadCollector:
             )
 
     def _collect_remote(self, config: AppConfig, runner) -> CollectorRun:
-        r = runner.run(["cat", "/proc/loadavg"], timeout=config.collectors.restic.timeout_sec)
+        r = runner.run(["cat", "/proc/loadavg"], timeout=15, login_shell=False)
         if r.returncode != 0:
             return CollectorRun(
                 collector_id=self.collector_id,

@@ -98,6 +98,8 @@ def llm_analyze_impl(
     api_key: str | None,
     action_registry: dict[str, Any] | None = None,
     previous_run_context: dict | None = None,
+    kb_context: str | None = None,
+    trend_context: dict | None = None,
 ) -> LLMAnalysisResult | None:
     """
     Call Anthropic API with AIgis system prompt.
@@ -160,8 +162,21 @@ def llm_analyze_impl(
                 + "\n\n"
             )
 
+        kb_block = ""
+        if kb_context:
+            kb_block = f"\n\nRelevant documentation (from knowledge base):\n{kb_context}\n"
+
+        trend_block = ""
+        if trend_context and (trend_context.get("recurring_issues") or trend_context.get("consecutive_failures")):
+            lines = [f"Trend analysis (last {trend_context['runs_analyzed']} runs):"]
+            for item in trend_context.get("recurring_issues", []):
+                lines.append(f"  Recurring issue: {item}")
+            for item in trend_context.get("consecutive_failures", []):
+                lines.append(f"  Consecutive failures: {item}")
+            trend_block = "\n\n" + "\n".join(lines) + "\n"
+
         user_content = f"""Analyze the following infrastructure health check results.
-{previous_run_block}{registry_info}
+{previous_run_block}{trend_block}{registry_info}{kb_block}
 
 Health check results (JSON):
 {checks_json}
@@ -202,12 +217,20 @@ def _map_to_suggested_actions(
     recommended_actions: list[dict[str, Any]],
     allowed_ids: set[str],
     registry_params: dict[str, list[str]],
-) -> list[SuggestedAction]:
-    """Map LLM recommended_actions to SuggestedAction, validating against registry."""
-    result: list[SuggestedAction] = []
+) -> tuple[list[SuggestedAction], list[dict[str, Any]]]:
+    """Map LLM recommended_actions to (matched_actions, manual_steps).
+
+    matched_actions: actions whose action_id is in the registry (have a script).
+    manual_steps: actions not in the registry, returned as {description, risk_level} dicts.
+    """
+    matched: list[SuggestedAction] = []
+    manual: list[dict[str, Any]] = []
     for a in recommended_actions:
         action_id = str(a.get("action_id", ""))
+        desc = str(a.get("description", a.get("reason", "")))
         if action_id not in allowed_ids:
+            if desc:
+                manual.append({"description": desc, "risk_level": str(a.get("risk_level", "low")), "steps": [str(s) for s in a.get("steps", [])]})
             continue
         required = set(registry_params.get(action_id, []))
         params = a.get("params") or {}
@@ -222,11 +245,12 @@ def _map_to_suggested_actions(
                 clean_params[k] = str(v)
         if required and not (required <= set(clean_params.keys())):
             continue
-        result.append(
+        matched.append(
             SuggestedAction(
                 action_id=action_id,
                 params=clean_params,
-                reason=str(a.get("description", a.get("reason", ""))),
+                reason=desc,
+                description=desc or None,
             )
         )
-    return result
+    return matched, manual

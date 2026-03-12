@@ -38,6 +38,9 @@ def build_report(
     checks: list[CheckResult],
     collector_runs: list[CollectorRun] | None = None,
     anomaly_explanation: str | None = None,
+    reasoning_trace: str | None = None,
+    detected_issues: list[dict] | None = None,
+    manual_recommendations: list[dict] | None = None,
     metadata: dict[str, str | int | float] | None = None,
 ) -> HealthReport:
     """Build HealthReport from check results, collected metrics, and optional LLM explanation."""
@@ -51,5 +54,8 @@ def build_report(
         checks=checks,
         collected_metrics=collected_metrics,
         anomaly_explanation=anomaly_explanation,
+        reasoning_trace=reasoning_trace,
+        detected_issues=detected_issues,
+        manual_recommendations=manual_recommendations,
         metadata=metadata or {},
     )

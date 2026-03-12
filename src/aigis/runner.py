@@ -26,8 +26,14 @@ class Runner(Protocol):
         """True if running on this machine."""
         ...
 
-    def run(self, cmd: list[str], timeout: int = 30) -> RunResult:
-        """Execute command. Returns (stdout, stderr, returncode)."""
+    def run(self, cmd: list[str], timeout: int = 30, login_shell: bool = True) -> RunResult:
+        """Execute command. Returns (stdout, stderr, returncode).
+
+        login_shell: when True (default), wraps remote commands in `bash -lc` so
+        that ~/.profile is sourced (required for restic env vars, docker PATH, etc.).
+        Set False for simple read-only commands (cat, df, ip) to skip profile
+        initialisation and avoid login-shell startup latency.
+        """
         ...
 
 
@@ -36,7 +42,7 @@ class LocalRunner:
 
     is_local = True
 
-    def run(self, cmd: list[str], timeout: int = 30) -> RunResult:
+    def run(self, cmd: list[str], timeout: int = 30, login_shell: bool = True) -> RunResult:
         try:
             r = subprocess.run(
                 cmd,
@@ -65,12 +71,18 @@ class SSHRunner:
         self._host = host
         self._ssh_key = ssh_key_path
 
-    def run(self, cmd: list[str], timeout: int = 30) -> RunResult:
-        args = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10"]
+    def run(self, cmd: list[str], timeout: int = 30, login_shell: bool = True) -> RunResult:
+        args = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=30", "-o", "LogLevel=ERROR"]
         if self._ssh_key:
             args.extend(["-i", self._ssh_key])
         args.append(self._host)
-        args.extend(cmd)
+        if login_shell:
+            # Login shell so ~/.profile is sourced — ensures PATH and env vars
+            # (RESTIC_REPOSITORY, etc.) match what the user sees interactively.
+            args += ["bash", "-lc", shlex.join(cmd)]
+        else:
+            # Direct exec — avoids login-shell startup latency for simple read commands.
+            args += cmd
         try:
             r = subprocess.run(
                 args,
@@ -102,7 +114,7 @@ class SSHPasswordRunner:
         self._password = password
         self._port = port
 
-    def run(self, cmd: list[str], timeout: int = 30) -> RunResult:
+    def run(self, cmd: list[str], timeout: int = 30, login_shell: bool = True) -> RunResult:
         import paramiko
 
         client = paramiko.SSHClient()
@@ -117,7 +129,11 @@ class SSHPasswordRunner:
                 look_for_keys=False,
                 allow_agent=False,
             )
-            command_str = shlex.join(cmd)
+            command_str = (
+                "bash -lc " + shlex.quote(shlex.join(cmd))
+                if login_shell
+                else shlex.join(cmd)
+            )
             _, stdout_ch, stderr_ch = client.exec_command(command_str, timeout=timeout)
             rc = stdout_ch.channel.recv_exit_status()
             return RunResult(

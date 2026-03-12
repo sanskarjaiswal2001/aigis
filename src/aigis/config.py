@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TargetConfig(BaseModel):
@@ -16,6 +16,14 @@ class TargetConfig(BaseModel):
     auth: Literal["key", "password"] = "key"
     ssh_key_path: str | None = None
     password: str | None = None
+
+    @model_validator(mode="after")
+    def _decrypt_password(self) -> "TargetConfig":
+        if self.password is not None:
+            from aigis.crypto import decrypt_password
+
+            self.password = decrypt_password(self.password)
+        return self
 
 
 class TargetsConfig(BaseModel):
@@ -34,6 +42,9 @@ class ResticConfig(BaseModel):
     repo_path: str = ""
     timeout_sec: int = 30
     expected_interval_hours: float = 24.0
+    integrity_check_enabled: bool = False
+    data_check_subset_percent: float = 5.0  # % of packs sampled per run (~20 runs for full coverage)
+    integrity_timeout_sec: int = 300  # Separate timeout; check can be slow on large repos
 
 
 class DiskConfig(BaseModel):
@@ -128,6 +139,7 @@ class ActionRegistryEntry(BaseModel):
 
     script: str
     params: list[str] = Field(default_factory=list)
+    auto_approve: bool = False  # Safe to run unattended when --auto-fix and confidence >= threshold
 
 
 class ActionsConfig(BaseModel):
@@ -138,6 +150,7 @@ class ActionsConfig(BaseModel):
     timeout_sec: int = 60
     registry: dict[str, ActionRegistryEntry] = Field(default_factory=dict)
     audit_log_path: str = "~/.aigis/audit.log"
+    auto_fix_min_confidence: str = "medium"  # Minimum LLM confidence for --auto-fix: "low" | "medium" | "high"
 
 
 class RunHistoryConfig(BaseModel):
@@ -170,6 +183,22 @@ class LLMConfig(BaseModel):
     phoenix: PhoenixConfig = Field(default_factory=PhoenixConfig)
 
 
+class KBConfig(BaseModel):
+    """Knowledge base ingestion and retrieval config."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    kb_dir: str = "~/.aigis/knowledge_base"    # Source documents directory
+    store_path: str = "~/.aigis/kb_store.json"  # Embedding cache (JSON)
+    model_name: str = "all-MiniLM-L6-v2"       # sentence-transformers model (~80MB)
+    chunk_size: int = 800                        # Characters per chunk
+    chunk_overlap: int = 80                      # Overlap between adjacent chunks
+    top_k: int = 3                               # Max chunks to inject per analysis
+    min_score: float = 0.3                       # Min cosine similarity to include
+    auto_reingest: bool = True                   # Re-ingest when source files change
+
+
 class AppConfig(BaseModel):
     """Full application configuration."""
 
@@ -183,6 +212,7 @@ class AppConfig(BaseModel):
     actions: ActionsConfig = Field(default_factory=ActionsConfig)
     run_history: RunHistoryConfig = Field(default_factory=RunHistoryConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    kb: KBConfig = Field(default_factory=KBConfig)
 
 
 def load_config(path: Path | None = None) -> AppConfig:

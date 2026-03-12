@@ -69,7 +69,7 @@ class DiskCollector:
 
     def _collect_remote(self, config: AppConfig, runner) -> CollectorRun:
         # df -P: POSIX format, one line per filesystem; 1K blocks
-        r = runner.run(["df", "-P", "-k"], timeout=config.collectors.restic.timeout_sec)
+        r = runner.run(["df", "-P", "-k"], timeout=15, login_shell=False)
         if r.returncode != 0:
             return CollectorRun(
                 collector_id=self.collector_id,
