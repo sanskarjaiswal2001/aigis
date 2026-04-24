@@ -1,0 +1,10 @@
+[Unit]
+Description=Run AIgis health check every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true        # Run immediately after a missed interval (e.g. after boot)
+RandomizedDelaySec=60  # Spread load if multiple hosts share the same schedule
+
+[Install]
+WantedBy=timers.target
