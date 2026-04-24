@@ -76,4 +76,4 @@ aigis --generate-key
 
 ## License
 
-GPL v3 (copyleft)
+[PolyForm Noncommercial License 1.0.0](LICENSE) — free for personal and non-commercial use; commercial use requires permission.
